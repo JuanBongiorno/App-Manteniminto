@@ -10,6 +10,8 @@
     <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.0.0/dist/signature_pad.umd.min.js"></script>
     <!-- Supabase SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- HTML2Canvas para capturar el reporte -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <style>
         :root {
@@ -135,6 +137,59 @@
         }
         .modal-content { background: white; color: #333; padding: 25px; border-radius: 15px; max-width: 480px; margin: auto; }
 
+        /* --- ESTILOS PARA REPRODUCIR LA FOTO EXACTA --- */
+        .captura-reporte {
+            background: white !important;
+            padding: 20px;
+            border-radius: 20px;
+            color: #333;
+            width: 100%;
+            max-width: 450px;
+            margin: auto;
+            box-sizing: border-box;
+        }
+        .captura-reporte h2 {
+            color: #005a9c;
+            text-align: center;
+            font-size: 1.4rem;
+            margin-bottom: 5px;
+        }
+        .captura-reporte hr {
+            border: none;
+            border-top: 1px solid #ccc;
+            margin: 10px 0;
+        }
+        .captura-reporte p {
+            margin: 4px 0;
+            font-size: 0.9rem;
+        }
+        .captura-reporte .label {
+            font-weight: bold;
+        }
+        .captura-reporte .firma-recuadro {
+            border: 1px solid #ccc;
+            width: 100%;
+            height: 120px;
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: white;
+        }
+        .captura-reporte .img-equipo-full {
+            width: 100%;
+            border-radius: 10px;
+            margin-top: 10px;
+            display: block;
+        }
+
+        /* Ocultar botones al imprimir */
+        @media print {
+            body * { visibility: hidden; }
+            #modal-content-body, #modal-content-body * { visibility: visible; }
+            #modal-content-body { position: absolute; left: 0; top: 0; width: 100%; }
+        }
+
         /* Loader */
         .loader {
             display: none;
@@ -228,6 +283,7 @@
         <textarea id="tech_obs" placeholder="Observaciones del técnico" required></textarea>
         <textarea id="tech_acciones" placeholder="Acciones realizadas" required></textarea>
         
+        <label>Responsable:</label>
         <div style="display: flex; gap: 10px;">
             <input type="text" id="tech_resp_nombre" placeholder="Nombre">
             <input type="text" id="tech_resp_apellido" placeholder="Apellido">
@@ -251,21 +307,30 @@
 
 <!-- MODAL DETALLE -->
 <div id="modal-detalle">
-    <div class="modal-content" id="modal-content-body"></div>
+    <div id="area-a-capturar" style="background: white;">
+        <div class="captura-reporte" id="modal-content-body"></div>
+    </div>
     <div class="container" style="max-width: 480px; margin-top: 10px;">
-        <button onclick="cerrarModal()" style="background: var(--celeste-brillante);">CERRAR DETALLE</button>
+        <div id="botones-accion" style="display:flex; flex-direction:column; gap:10px;">
+            <button id="btnFullFoto" onclick="descargarReporteCompleto()" style="background:#f39c12;"><i class="fas fa-camera"></i> DESCARGAR REPORTE COMPLETO (FOTO)</button>
+            <button id="btnWA" onclick="compartirSoloTexto('WA')" style="background:#25d366;"><i class="fab fa-whatsapp"></i> ENVIAR DATOS POR WHATSAPP</button>
+            <button id="btnMail" onclick="compartirSoloTexto('MAIL')" style="background:#0078D4;"><i class="fas fa-envelope"></i> ENVIAR DATOS POR EMAIL</button>
+            <button onclick="window.print()" style="background:#333;"><i class="fas fa-print"></i> IMPRIMIR REPORTE</button>
+            <button onclick="cerrarModal()" style="background: var(--rojo);">CERRAR DETALLE</button>
+        </div>
     </div>
 </div>
 
 <script>
     // CONFIGURACIÓN SUPABASE
     const SUPABASE_URL = 'https://bqabeuurepaezrvrvjls.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxYWJldXVyZXBhZXpydnJ2amxzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwODM1ODIsImV4cCI6MjA5ODY1OTU4Mn0.V7IbAR36FGDwaagJ9rgfq3mKphdr6Kr1ayZtxpiCFyg'; // <-- PEGA TU LLAVE ANON AQUÍ
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxYWJldXVyZXBhZXpydnJ2amxzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwODM1ODIsImV4cCI6MjA5ODY1OTU4Mn0.V7IbAR36FGDwaagJ9rgfq3mKphdr6Kr1ayZtxpiCFyg'; 
     const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     let pedidos = [];
     let currentUser = null;
     let currentPedidoId = null;
+    let currentPedidoData = null;
     let signaturePad;
 
     window.onload = () => {
@@ -486,50 +551,119 @@
         }
     }
 
+    // --- FUNCIÓN ACTUALIZADA PARA DISEÑO DE FOTO ---
     function verDetalle(p) {
         const modal = document.getElementById('modal-detalle');
         const content = document.getElementById('modal-content-body');
+        currentPedidoId = p.dispenser_id;
+        currentPedidoData = p; // Guardar para compartir texto
         
-        // --- ARREGLO: ASEGURAR QUE LA FIRMA SE VEA ---
         content.innerHTML = `
-            <h3 style="color:var(--azul-marino); text-align:center;">Reporte de Servicio</h3>
-            <hr><br>
-            <div style="font-size: 14px; color:#333;">
-                <p><strong>Fecha:</strong> ${p.fecha}</p>
-                <p><strong>ID Dispenser:</strong> ${p.dispenser_id}</p>
-                <p><strong>Cliente:</strong> ${p.cliente_usuario}</p>
-                <p><strong>Falla:</strong> ${p.desperfecto}</p>
-                <hr style="margin:10px 0;">
-                <p><strong>ESTADO FINAL:</strong> ${p.estado}</p>
-                <p><strong>Técnico:</strong> ${p.tech_responsable || 'Sin datos'}</p>
-                <p><strong>Acciones:</strong> ${p.tech_acciones || 'N/A'}</p>
-                ${p.tech_foto_url ? `<p><strong>Foto del Equipo:</strong><br><img src="${p.tech_foto_url}" class="report-img"></p>` : ''}
-                <p><strong>Firma de conformidad:</strong></p>
-                ${p.tech_firma_url ? `<img src="${p.tech_firma_url}" style="width:200px; border:1px solid #ccc; background:#fff; display:block; margin:10px 0;">` : '<p><i>Sin firma</i></p>'}
-            </div>
-            
-            <div style="margin-top:20px; display:flex; flex-direction:column; gap:10px">
-                <button onclick="compartirWhatsApp('${p.dispenser_id}', '${p.estado}', '${p.cliente_usuario}', '${p.tech_acciones}')" style="background:#25d366;"><i class="fab fa-whatsapp"></i> WHATSAPP</button>
-                <button onclick="enviarEmail('${p.dispenser_id}', '${p.cliente_usuario}', '${p.estado}')" style="background:#0078D4;"><i class="fas fa-envelope"></i> ENVIAR POR EMAIL</button>
-                <button onclick="window.print()" style="background:#333;"><i class="fas fa-print"></i> IMPRIMIR</button>
+            <h2>Reporte de Servicio</h2>
+            <hr>
+            <p><span class="label">Fecha:</span> ${p.fecha}</p>
+            <p><span class="label">ID Dispenser:</span> ${p.dispenser_id}</p>
+            <p><span class="label">Cliente:</span> ${p.cliente_usuario}</p>
+            <p><span class="label">Falla Reportada:</span> ${p.desperfecto}</p>
+            <hr>
+            <p><span class="label">ESTADO FINAL:</span> ${p.estado}</p>
+            <p><span class="label">Responsable:</span> ${p.tech_responsable || '---'}</p>
+            <p><span class="label">Acciones Realizadas:</span> ${p.tech_acciones || '---'}</p>
+            <p><span class="label">Observaciones Técnico:</span> ${p.tech_obs || '---'}</p>
+            <p><span class="label">Foto del Equipo:</span></p>
+            ${p.tech_foto_url ? `<img src="${p.tech_foto_url}" class="img-equipo-full" crossOrigin="anonymous">` : '<p><i>Sin foto</i></p>'}
+            <p><span class="label" style="margin-top:10px; display:block;">Firma de conformidad:</span></p>
+            <div class="firma-recuadro">
+                ${p.tech_firma_url ? `<img src="${p.tech_firma_url}" style="max-height:100px;" crossOrigin="anonymous">` : '<i>Sin firma</i>'}
             </div>
         `;
         modal.style.display = 'block';
     }
 
+    // --- COMPARTIR SOLO TEXTO (DATOS COMPLETADOS Y VERTICALES) ---
+    function compartirSoloTexto(tipo) {
+        const p = currentPedidoData;
+        if(!p) return;
+
+        const mensaje = `*REPORTE DE SERVICIO SURAGUA*\n\n` +
+            `*ID Dispenser:* ${p.dispenser_id}\n` +
+            `*Cliente:* ${p.cliente_usuario}\n` +
+            `*Falla:* ${p.desperfecto}\n` +
+            `*Estado:* ${p.estado}\n` +
+            `*Responsable:* ${p.tech_responsable || '---'}\n` +
+            `*Acciones:* ${p.tech_acciones || '---'}\n` +
+            `*Observaciones:* ${p.tech_obs || '---'}\n\n` +
+            `_Reporte generado desde la gestión en la nube._`;
+
+        if(tipo === 'WA') {
+            window.open(`https://wa.me/?text=${encodeURIComponent(mensaje)}`, '_blank');
+        } else {
+            const subject = `Reporte SURAGUA ID ${p.dispenser_id}`;
+            window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(mensaje)}`;
+        }
+    }
+
+    // --- DESCARGAR REPORTE VISUAL COMPLETO (CORREGIDO PARA EVITAR SHARE FAILED) ---
+    async function descargarReporteCompleto() {
+        const area = document.getElementById('area-a-capturar');
+        const btn = document.getElementById('btnFullFoto');
+        const originalText = btn.innerHTML;
+        
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> GENERANDO IMAGEN...';
+        btn.disabled = true;
+
+        try {
+            const canvas = await html2canvas(area, {
+                useCORS: true,
+                scale: 2,
+                backgroundColor: "#ffffff",
+                logging: false
+            });
+            
+            const dataUrl = canvas.toDataURL('image/png');
+            const blob = await (await fetch(dataUrl)).blob();
+            const file = new File([blob], `Reporte_SURAGUA_${currentPedidoId}.png`, { type: 'image/png' });
+
+            // Intentar compartir primero
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: 'Reporte SURAGUA Full',
+                        text: `Reporte visual completo del equipo ID ${currentPedidoId}`
+                    });
+                } catch (shareErr) {
+                    // Si el usuario cancela o hay un error de sistema, pasamos a descarga directa
+                    realizarDescargaDirecta(dataUrl);
+                }
+            } else {
+                // Si el navegador no soporta compartir (Desktop o No-HTTPS)
+                realizarDescargaDirecta(dataUrl);
+            }
+        } catch (e) {
+            alert("Error al generar imagen: " + e.message);
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    function realizarDescargaDirecta(url) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Reporte_SURAGUA_${currentPedidoId}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        alert("Reporte descargado como imagen en tu galería.");
+    }
+
     function cerrarModal() { document.getElementById('modal-detalle').style.display = 'none'; }
 
-    // --- AGREGADO: FUNCIONES DE COMPARTIR ---
-    function compartirWhatsApp(id, estado, cliente, acciones) {
-        const msg = encodeURIComponent(`SURAGUA - Reporte de Servicio\nEquipo ID: ${id}\nCliente: ${cliente}\nAcciones: ${acciones}\nEstado Final: ${estado}`);
-        window.open(`https://wa.me/?text=${msg}`);
-    }
-
-    function enviarEmail(id, cliente, estado) {
-        const subject = encodeURIComponent(`Reporte de Servicio SURAGUA - ID ${id}`);
-        const body = encodeURIComponent(`Hola,\nAdjuntamos reporte del equipo ID ${id} (${cliente}).\nEstado final: ${estado}`);
-        window.location.href = `mailto:?subject=${subject}&body=${body}`;
-    }
+    // --- FUNCIONES ORIGINALES ---
+    function generarYCompartir(tipo) {}
+    function compartirWhatsApp(id, estado, cliente, acciones) {}
+    function enviarEmail(id, cliente, estado) {}
 </script>
 </body>
 </html>
