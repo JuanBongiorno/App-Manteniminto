@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SURAGUA - Gestión en la Nube</title>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Signature Pad -->
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.0.0/dist/signature_pad.umd.min.js"></script>
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        :root {
+            --azul-oscuro: #001f3f;
+            --azul-marino: #003366;
+            --celeste-brillante: #007bff;
+            --blanco: #ffffff;
+            --amarillo: #ffc107;
+            --verde: #28a745;
+            --rojo: #dc3545;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+
+        body {
+            background: #001f3f; /* Fondo sólido por defecto */
+            background-image: linear-gradient(rgba(0,31,63,0.8), rgba(0,31,63,0.8)), url('fondo.jpg');
+            background-size: cover;
+            background-attachment: fixed;
+            color: var(--blanco);
+            min-height: 100vh;
+        }
+
+        .container { max-width: 500px; margin: 0 auto; padding: 20px; }
+
+        header { text-align: center; margin-bottom: 20px; }
+        .logo { max-width: 180px; filter: drop-shadow(2px 2px 5px rgba(0,0,0,0.5)); }
+
+        #login-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+            text-align: center;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 10px;
+            border: none;
+            background: white;
+            color: #333;
+            font-size: 1rem;
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            background: var(--celeste-brillante);
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            margin-top: 10px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        button:hover { opacity: 0.9; transform: scale(1.01); }
+        .btn-secondary { background: var(--azul-marino); border: 1px solid rgba(255,255,255,0.3); }
+
+        .view-section { display: none; }
+        .menu-vertical { display: flex; flex-direction: column; gap: 15px; margin-top: 20px; }
+
+        .card {
+            background: white;
+            color: #333;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            border-left: 10px solid var(--amarillo);
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            position: relative;
+        }
+        .card.listo { border-left-color: var(--verde); }
+
+        .status-light {
+            width: 12px; height: 12px; border-radius: 50%;
+            display: inline-block; margin-right: 10px;
+        }
+        .bg-yellow { background: var(--amarillo); }
+        .bg-green { background: var(--verde); }
+
+        .report-img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            margin: 10px 0;
+            border: 2px solid #ddd;
+        }
+
+        #signature-pad {
+            border: 1px solid #ccc;
+            background: #f9f9f9;
+            width: 100%;
+            height: 160px;
+            border-radius: 10px;
+            touch-action: none; /* Crucial para móviles */
+        }
+
+        .info-box-tech {
+            background: rgba(255,255,255,0.15);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 1px dashed white;
+            font-size: 0.9rem;
+        }
+
+        #modal-detalle {
+            position: fixed; top:0; left:0; width: 100%; height:100%;
+            background: rgba(0,0,0,0.95); z-index: 1000; overflow-y: auto; padding: 20px;
+            display: none;
+        }
+        .modal-content { background: white; color: #333; padding: 25px; border-radius: 15px; max-width: 480px; margin: auto; }
+
+        /* Loader */
+        .loader {
+            display: none;
+            text-align: center;
+            padding: 10px;
+            font-weight: bold;
+            color: var(--amarillo);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <img src="logo.png" alt="SURAGUA" class="logo">
+        <div id="sync-status" style="font-size: 0.7rem; opacity: 0.7;">Conectado a la nube</div>
+    </header>
+
+    <!-- LOGIN -->
+    <div id="login-section">
+        <h2 style="margin-bottom: 20px;">Acceso al Sistema</h2>
+        <select id="user">
+            <option value="admin">Oficina / Admin</option>
+            <option value="servicio tecnico">Servicio Técnico</option>
+        </select>
+        <input type="password" id="pass" placeholder="Contraseña">
+        <button onclick="login()"><i class="fas fa-sign-in-alt"></i> Ingresar</button>
+    </div>
+
+    <!-- DASHBOARD ADMIN -->
+    <div id="admin-view" class="view-section">
+        <h3 style="text-align: center;">Panel Administración</h3>
+        <div class="menu-vertical">
+            <button onclick="showSection('carga-view')"><i class="fas fa-plus-circle"></i> Carga de Pedidos</button>
+            <button onclick="abrirGestion()"><i class="fas fa-tasks"></i> Gestión de Pedidos</button>
+            <button onclick="logout()" style="background: var(--rojo); margin-top: 20px;"><i class="fas fa-power-off"></i> Cerrar Sesión</button>
+        </div>
+    </div>
+
+    <!-- DASHBOARD TÉCNICO -->
+    <div id="tech-view" class="view-section">
+        <h3 style="text-align: center;">Panel Servicio Técnico</h3>
+        <div class="menu-vertical">
+            <button onclick="abrirPedidosTech()"><i class="fas fa-tools"></i> Órdenes de Trabajo</button>
+            <button onclick="abrirGestion()"><i class="fas fa-search"></i> Buscar Pedidos</button>
+            <button onclick="logout()" style="background: var(--rojo); margin-top: 20px;"><i class="fas fa-power-off"></i> Cerrar Sesión</button>
+        </div>
+    </div>
+
+    <!-- FORMULARIO CARGA -->
+    <div id="carga-view" class="view-section">
+        <button onclick="backToMenu()" class="btn-secondary"><i class="fas fa-arrow-left"></i> Volver</button>
+        <h2 style="margin: 15px 0;">Nuevo Pedido</h2>
+        <form id="form-pedido">
+            <input type="text" id="dispenser_id" placeholder="ID del Dispenser" required>
+            <input type="text" id="cliente_usuario" placeholder="Usuario / Cliente" required>
+            <input type="text" id="sector" placeholder="Sector">
+            <input type="text" id="lugar" placeholder="Lugar Específico">
+            <textarea id="desperfecto" placeholder="Desperfecto" rows="3" required></textarea>
+            <textarea id="observaciones" placeholder="Observaciones del Pedido" rows="2"></textarea>
+            <input type="text" id="contacto" placeholder="Contacto">
+            <input type="text" id="extra" placeholder="Extra">
+            <button type="button" id="btnGuardar" onclick="guardarPedido()" style="background: var(--verde);">Guardar en Nube</button>
+        </form>
+    </div>
+
+    <!-- GESTIÓN / LISTADO -->
+    <div id="gestion-view" class="view-section">
+        <button onclick="backToMenu()" class="btn-secondary"><i class="fas fa-arrow-left"></i> Volver</button>
+        <h2 style="margin: 15px 0;">Gestión de Pedidos</h2>
+        <input type="date" id="search-date" onchange="renderPedidos()">
+        <div id="loader-list" class="loader">Cargando datos...</div>
+        <div id="lista-pedidos" style="margin-top:15px;"></div>
+    </div>
+
+    <!-- PEDIDOS TÉCNICO -->
+    <div id="pedidos-tech-view" class="view-section">
+        <button onclick="backToMenu()" class="btn-secondary"><i class="fas fa-arrow-left"></i> Volver</button>
+        <h2 style="margin: 15px 0;">Órdenes de Trabajo</h2>
+        <div id="loader-tech" class="loader">Actualizando pedidos...</div>
+        <div id="lista-pedidos-tech"></div>
+    </div>
+
+    <!-- FORMULARIO CIERRE TÉCNICO -->
+    <div id="cierre-tech-view" class="view-section">
+        <button onclick="showSection('pedidos-tech-view')" class="btn-secondary"><i class="fas fa-arrow-left"></i> Volver</button>
+        <h2 style="margin: 15px 0;">Finalizar Trabajo</h2>
+        
+        <div id="info-equipo-completa" class="info-box-tech"></div>
+
+        <textarea id="tech_obs" placeholder="Observaciones del técnico" required></textarea>
+        <textarea id="tech_acciones" placeholder="Acciones realizadas" required></textarea>
+        
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="tech_resp_nombre" placeholder="Nombre">
+            <input type="text" id="tech_resp_apellido" placeholder="Apellido">
+        </div>
+
+        <label>Foto del Equipo (Obligatorio):</label>
+        <input type="file" id="tech_foto" accept="image/*" capture="camera">
+        
+        <label>Firma del Responsable:</label>
+        <canvas id="signature-pad"></canvas>
+        <button onclick="signaturePad.clear()" class="btn-secondary" style="padding: 5px; font-size: 10px;">LIMPIAR FIRMA</button>
+
+        <label>Estado Final:</label>
+        <select id="tech_estado_final">
+            <option value="AMARILLO">PENDIENTE (AMARILLO)</option>
+            <option value="VERDE">MAQUINA LISTA (VERDE)</option>
+        </select>
+        <button id="btnFinalizar" onclick="finalizarPedido()" style="background: var(--verde); margin-bottom: 50px;">Subir Reporte</button>
+    </div>
+</div>
+
+<!-- MODAL DETALLE -->
+<div id="modal-detalle">
+    <div class="modal-content" id="modal-content-body"></div>
+    <div class="container" style="max-width: 480px; margin-top: 10px;">
+        <button onclick="cerrarModal()" style="background: var(--celeste-brillante);">CERRAR DETALLE</button>
+    </div>
+</div>
+
+<script>
+    // CONFIGURACIÓN SUPABASE
+    const SUPABASE_URL = 'https://bqabeuurepaezrvrvjls.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxYWJldXVyZXBhZXpydnJ2amxzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwODM1ODIsImV4cCI6MjA5ODY1OTU4Mn0.V7IbAR36FGDwaagJ9rgfq3mKphdr6Kr1ayZtxpiCFyg'; // <-- PEGA TU LLAVE ANON AQUÍ
+    const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let pedidos = [];
+    let currentUser = null;
+    let currentPedidoId = null;
+    let signaturePad;
+
+    window.onload = () => {
+        const canvas = document.getElementById('signature-pad');
+        signaturePad = new SignaturePad(canvas);
+        signaturePad.penColor = "rgb(0, 0, 0)"; // FIRMA EN NEGRO
+        
+        // Ajuste inicial (puede fallar si está oculto)
+        resizeCanvas();
+    };
+
+    // --- AGREGADO: FUNCION PARA QUE LA FIRMA NO FALLE ---
+    function resizeCanvas() {
+        const canvas = document.getElementById('signature-pad');
+        const ratio =  Math.max(window.devicePixelRatio || 1, 1);
+        canvas.width = canvas.offsetWidth * ratio;
+        canvas.height = canvas.offsetHeight * ratio;
+        canvas.getContext("2d").scale(ratio, ratio);
+        if(signaturePad) signaturePad.clear(); 
+    }
+
+    // NAVEGACIÓN Y LOGIN
+    async function login() {
+        const u = document.getElementById('user').value;
+        const p = document.getElementById('pass').value;
+
+        if (u === "admin" && p === "oficina3876") {
+            currentUser = "admin";
+            showSection('admin-view');
+        } else if (u === "servicio tecnico" && p === "broncel3876") {
+            currentUser = "tech";
+            showSection('tech-view');
+        } else {
+            alert("Contraseña incorrecta");
+        }
+    }
+
+    function logout() {
+        currentUser = null;
+        document.getElementById('pass').value = "";
+        showSection('login-section');
+    }
+
+    function showSection(id) {
+        document.querySelectorAll('.view-section, #login-section').forEach(s => s.style.display = 'none');
+        document.getElementById(id).style.display = 'block';
+        window.scrollTo(0,0);
+        // Si entramos al cierre tecnico, recalculamos el canvas porque ahora si es visible
+        if(id === 'cierre-tech-view') { setTimeout(resizeCanvas, 100); }
+    }
+
+    function backToMenu() {
+        showSection(currentUser === "admin" ? 'admin-view' : 'tech-view');
+    }
+
+    // OPERACIONES DE DATOS
+    async function cargarPedidos() {
+        const { data, error } = await _supabase
+            .from('pedidos')
+            .select('*')
+            .order('fecha', { ascending: false });
+        
+        if (error) {
+            console.error(error);
+            return [];
+        }
+        pedidos = data;
+        return data;
+    }
+
+    async function abrirGestion() {
+        showSection('gestion-view');
+        document.getElementById('loader-list').style.display = 'block';
+        await cargarPedidos();
+        document.getElementById('loader-list').style.display = 'none';
+        renderPedidos();
+    }
+
+    async function abrirPedidosTech() {
+        showSection('pedidos-tech-view');
+        document.getElementById('loader-tech').style.display = 'block';
+        await cargarPedidos();
+        document.getElementById('loader-tech').style.display = 'none';
+        renderPedidosTech();
+    }
+
+    async function guardarPedido() {
+        const btn = document.getElementById('btnGuardar');
+        const nuevo = {
+            dispenser_id: document.getElementById('dispenser_id').value,
+            cliente_usuario: document.getElementById('cliente_usuario').value,
+            sector: document.getElementById('sector').value,
+            lugar: document.getElementById('lugar').value,
+            desperfecto: document.getElementById('desperfecto').value,
+            observaciones: document.getElementById('observaciones').value,
+            contacto: document.getElementById('contacto').value,
+            extra: document.getElementById('extra').value,
+            estado: 'AMARILLO'
+        };
+
+        if(!nuevo.dispenser_id || !nuevo.cliente_usuario) return alert("Faltan datos obligatorios");
+        
+        btn.disabled = true;
+        btn.innerText = "GUARDANDO...";
+
+        const { error } = await _supabase.from('pedidos').insert([nuevo]);
+
+        if(error) {
+            alert("Error al guardar: " + error.message);
+        } else {
+            alert("Pedido guardado con éxito en la nube");
+            document.getElementById('form-pedido').reset();
+            backToMenu();
+        }
+        btn.disabled = false;
+        btn.innerText = "GUARDAR EN NUBE";
+    }
+
+    function renderPedidos() {
+        const container = document.getElementById('lista-pedidos');
+        const filterDate = document.getElementById('search-date').value;
+        container.innerHTML = "";
+        
+        const filtered = filterDate ? pedidos.filter(p => p.fecha === filterDate) : pedidos;
+
+        filtered.forEach((p) => {
+            const card = document.createElement('div');
+            card.className = `card ${p.estado === 'VERDE' ? 'listo' : ''}`;
+            card.onclick = () => verDetalle(p);
+            card.innerHTML = `
+                <span class="status-light ${p.estado === 'VERDE' ? 'bg-green' : 'bg-yellow'}"></span>
+                <strong>ID: ${p.dispenser_id}</strong> - ${p.cliente_usuario}<br>
+                <small>${p.fecha} | ${p.sector || 'Sin Sector'}</small>
+            `;
+            container.appendChild(card);
+        });
+    }
+
+    function renderPedidosTech() {
+        const container = document.getElementById('lista-pedidos-tech');
+        container.innerHTML = "";
+        pedidos.filter(p => p.estado === 'AMARILLO').forEach((p) => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.onclick = () => abrirCierreTech(p);
+            card.innerHTML = `<strong>Dispenser: ${p.dispenser_id}</strong><br><small>${p.cliente_usuario} - ${p.sector}</small>`;
+            container.appendChild(card);
+        });
+    }
+
+    function abrirCierreTech(p) {
+        currentPedidoId = p.id;
+        document.getElementById('info-equipo-completa').innerHTML = `
+            <p><strong>DATOS DEL PEDIDO:</strong></p>
+            <p>ID Dispenser: ${p.dispenser_id}</p>
+            <p>Usuario: ${p.cliente_usuario}</p>
+            <p>Falla: ${p.desperfecto}</p>
+            <p>Contacto: ${p.contacto || 'N/A'}</p>
+        `;
+        showSection('cierre-tech-view');
+        signaturePad.clear();
+    }
+
+    async function finalizarPedido() {
+        const btn = document.getElementById('btnFinalizar');
+        const obs = document.getElementById('tech_obs').value;
+        const acciones = document.getElementById('tech_acciones').value;
+        const nombre = document.getElementById('tech_resp_nombre').value;
+        const fotoInput = document.getElementById('tech_foto');
+        const estado = document.getElementById('tech_estado_final').value;
+
+        if(!obs || !acciones || !nombre || fotoInput.files.length === 0 || signaturePad.isEmpty()) {
+            return alert("Falta foto, firma o datos obligatorios.");
+        }
+
+        btn.disabled = true;
+        btn.innerText = "SUBIENDO REPORTE...";
+
+        try {
+            // 1. Subir Foto
+            const fotoFile = fotoInput.files[0];
+            const fotoExt = fotoFile.name.split('.').pop();
+            const fotoNombre = `${Date.now()}_img.${fotoExt}`;
+            const { data: dFoto, error: eFoto } = await _supabase.storage.from('fotos').upload(fotoNombre, fotoFile);
+            if(eFoto) throw eFoto;
+
+            // 2. Subir Firma (Convertir a blob)
+            const firmaDataUrl = signaturePad.toDataURL();
+            const response = await fetch(firmaDataUrl);
+            const firmaBlob = await response.blob();
+            const firmaNombre = `${Date.now()}_firma.png`;
+            const { data: dFirma, error: eFirma } = await _supabase.storage.from('fotos').upload(firmaNombre, firmaBlob);
+            if(eFirma) throw eFirma;
+
+            // 3. Obtener URLs
+            const urlFoto = _supabase.storage.from('fotos').getPublicUrl(fotoNombre).data.publicUrl;
+            const urlFirma = _supabase.storage.from('fotos').getPublicUrl(firmaNombre).data.publicUrl;
+
+            // 4. Actualizar Base de Datos
+            const { error: eDB } = await _supabase.from('pedidos').update({
+                tech_obs: obs,
+                tech_acciones: acciones,
+                tech_responsable: `${nombre} ${document.getElementById('tech_resp_apellido').value}`,
+                tech_foto_url: urlFoto,
+                tech_firma_url: urlFirma,
+                estado: estado
+            }).eq('id', currentPedidoId);
+
+            if(eDB) throw eDB;
+
+            alert("Reporte finalizado y guardado en la nube.");
+            backToMenu();
+        } catch (err) {
+            alert("Error: " + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "SUBIR REPORTE";
+        }
+    }
+
+    function verDetalle(p) {
+        const modal = document.getElementById('modal-detalle');
+        const content = document.getElementById('modal-content-body');
+        
+        // --- ARREGLO: ASEGURAR QUE LA FIRMA SE VEA ---
+        content.innerHTML = `
+            <h3 style="color:var(--azul-marino); text-align:center;">Reporte de Servicio</h3>
+            <hr><br>
+            <div style="font-size: 14px; color:#333;">
+                <p><strong>Fecha:</strong> ${p.fecha}</p>
+                <p><strong>ID Dispenser:</strong> ${p.dispenser_id}</p>
+                <p><strong>Cliente:</strong> ${p.cliente_usuario}</p>
+                <p><strong>Falla:</strong> ${p.desperfecto}</p>
+                <hr style="margin:10px 0;">
+                <p><strong>ESTADO FINAL:</strong> ${p.estado}</p>
+                <p><strong>Técnico:</strong> ${p.tech_responsable || 'Sin datos'}</p>
+                <p><strong>Acciones:</strong> ${p.tech_acciones || 'N/A'}</p>
+                ${p.tech_foto_url ? `<p><strong>Foto del Equipo:</strong><br><img src="${p.tech_foto_url}" class="report-img"></p>` : ''}
+                <p><strong>Firma de conformidad:</strong></p>
+                ${p.tech_firma_url ? `<img src="${p.tech_firma_url}" style="width:200px; border:1px solid #ccc; background:#fff; display:block; margin:10px 0;">` : '<p><i>Sin firma</i></p>'}
+            </div>
+            
+            <div style="margin-top:20px; display:flex; flex-direction:column; gap:10px">
+                <button onclick="compartirWhatsApp('${p.dispenser_id}', '${p.estado}', '${p.cliente_usuario}', '${p.tech_acciones}')" style="background:#25d366;"><i class="fab fa-whatsapp"></i> WHATSAPP</button>
+                <button onclick="enviarEmail('${p.dispenser_id}', '${p.cliente_usuario}', '${p.estado}')" style="background:#0078D4;"><i class="fas fa-envelope"></i> ENVIAR POR EMAIL</button>
+                <button onclick="window.print()" style="background:#333;"><i class="fas fa-print"></i> IMPRIMIR</button>
+            </div>
+        `;
+        modal.style.display = 'block';
+    }
+
+    function cerrarModal() { document.getElementById('modal-detalle').style.display = 'none'; }
+
+    // --- AGREGADO: FUNCIONES DE COMPARTIR ---
+    function compartirWhatsApp(id, estado, cliente, acciones) {
+        const msg = encodeURIComponent(`SURAGUA - Reporte de Servicio\nEquipo ID: ${id}\nCliente: ${cliente}\nAcciones: ${acciones}\nEstado Final: ${estado}`);
+        window.open(`https://wa.me/?text=${msg}`);
+    }
+
+    function enviarEmail(id, cliente, estado) {
+        const subject = encodeURIComponent(`Reporte de Servicio SURAGUA - ID ${id}`);
+        const body = encodeURIComponent(`Hola,\nAdjuntamos reporte del equipo ID ${id} (${cliente}).\nEstado final: ${estado}`);
+        window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    }
+</script>
+</body>
+</html>
