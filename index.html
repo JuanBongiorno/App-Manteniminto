@@ -1,4 +1,4 @@
-
+- V 1.0.1 -
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -187,8 +187,11 @@
         /* Ocultar botones al imprimir */
         @media print {
             body * { visibility: hidden; }
-            #modal-content-body, #modal-content-body * { visibility: visible; }
-            #modal-content-body { position: absolute; left: 0; top: 0; width: 100%; }
+            #modal-detalle, #modal-detalle *, #area-a-capturar, #modal-content-body, #modal-content-body * { visibility: visible; }
+            #modal-detalle { position: absolute !important; left: 0; top: 0; width: 100%; height: auto !important; overflow: visible !important; background: white !important; }
+            #modal-content-body { position: relative; width: 100%; padding: 0; }
+            #botones-accion, button { display: none !important; }
+            body { background: white !important; height: auto !important; }
         }
 
         /* Loader */
@@ -731,7 +734,7 @@
             <p><span class="label">Acciones Realizadas:</span> ${p.tech_acciones || '---'}</p>
             <p><span class="label">Observaciones Técnico:</span> ${p.tech_obs || '---'}</p>
             <p><span class="label">Foto del Equipo:</span></p>
-            ${p.tech_foto_url ? `<img src="${p.tech_foto_url}" class="img-equipo-full" crossOrigin="anonymous">` : '<p><i>Sin foto</i></p>'}
+            ${p.tech_foto_url ? `<img src="${p.tech_foto_url}" class="img-equipo-full" crossOrigin="anonymous">` : '<p><i>Sin foto</i></p'}
             <p><span class="label" style="margin-top:10px; display:block;">Firma de conformidad:</span></p>
             <div class="firma-recuadro">
                 ${p.tech_firma_url ? `<img src="${p.tech_firma_url}" style="max-height:100px;" crossOrigin="anonymous">` : '<i>Sin firma</i>'}
@@ -771,11 +774,17 @@
         btn.disabled = true;
 
         try {
+            // Asegurar que el scroll esté arriba para capturar todo
+            const modal = document.getElementById('modal-detalle');
+            modal.scrollTop = 0;
+
             const canvas = await html2canvas(area, {
                 useCORS: true,
-                scale: 2,
+                scale: 3, // Mayor calidad para que se vea toda la hoja
                 backgroundColor: "#ffffff",
-                logging: false
+                logging: false,
+                height: area.scrollHeight,
+                windowHeight: area.scrollHeight
             });
             
             const dataUrl = canvas.toDataURL('image/png');
@@ -787,7 +796,7 @@
                     await navigator.share({
                         files: [file],
                         title: 'Reporte SURAGUA Full',
-                        text: `Reporte visual completo del equipo ID ${currentPedidoId}`
+                        text: `Adjunto reporte completo del dispenser ID ${currentPedidoId}.`
                     });
                 } catch (shareErr) {
                     realizarDescargaDirecta(dataUrl);
