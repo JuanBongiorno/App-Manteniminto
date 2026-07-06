@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -351,6 +352,13 @@
         signaturePad = new SignaturePad(canvas);
         signaturePad.penColor = "rgb(0, 0, 0)"; // FIRMA EN NEGRO
         
+        // Carga inicial forzada desde cache para que no esté vacío al abrir
+        const local = localStorage.getItem('cache_pedidos');
+        if(local) {
+            pedidos = JSON.parse(local);
+            console.log("Datos cargados desde cache al iniciar");
+        }
+
         // Ajuste inicial (puede fallar si está oculto)
         resizeCanvas();
 
@@ -377,9 +385,11 @@
 
         if (u === "admin" && p === "oficina3876") {
             currentUser = "admin";
+            cargarPedidos(); // Dispara carga de fondo
             showSection('admin-view');
         } else if (u === "servicio tecnico" && p === "broncel3876") {
             currentUser = "tech";
+            cargarPedidos(); // Dispara carga de fondo
             showSection('tech-view');
         } else {
             alert("Contraseña incorrecta");
@@ -415,17 +425,23 @@
         }
 
         try {
+            // No bloqueamos la ejecución si no hay internet (usando un timeout corto o manejo de error)
             const { data, error } = await _supabase
                 .from('pedidos')
                 .select('*')
                 .order('fecha', { ascending: false });
             
-            if (!error) {
+            if (!error && data) {
                 pedidos = data;
                 localStorage.setItem('cache_pedidos', JSON.stringify(data));
+                renderPedidos();
+                renderPedidosTech();
             }
         } catch (e) {
-            console.log("Modo offline: usando cache local");
+            console.log("Modo offline o error de red: usando cache local");
+            // Aun con error, nos aseguramos que renderPedidos use lo que hay en memoria
+            renderPedidos();
+            renderPedidosTech();
         }
         
         return pedidos;
@@ -467,6 +483,10 @@
         // --- LOGICA OFFLINE: GUARDAR EN COLA ---
         agregarAColaSync('NUEVO_PEDIDO', nuevo);
         
+        // Actualizar vista local inmediatamente
+        pedidos.unshift(nuevo);
+        localStorage.setItem('cache_pedidos', JSON.stringify(pedidos));
+
         alert("Pedido guardado localmente. Se subirá automáticamente al detectar internet.");
         document.getElementById('form-pedido').reset();
         backToMenu();
@@ -475,10 +495,16 @@
 
     function renderPedidos() {
         const container = document.getElementById('lista-pedidos');
+        if(!container) return;
         const filterDate = document.getElementById('search-date').value;
         container.innerHTML = "";
         
         const filtered = filterDate ? pedidos.filter(p => p.fecha === filterDate) : pedidos;
+
+        if(filtered.length === 0) {
+            container.innerHTML = "<p style='text-align:center; padding:20px;'>No hay datos disponibles localmente.</p>";
+            return;
+        }
 
         filtered.forEach((p) => {
             const card = document.createElement('div');
@@ -497,7 +523,15 @@
         const container = document.getElementById('lista-pedidos-tech');
         if(!container) return;
         container.innerHTML = "";
-        pedidos.filter(p => p.estado === 'AMARILLO').forEach((p) => {
+        
+        const pendientes = pedidos.filter(p => p.estado === 'AMARILLO');
+
+        if(pendientes.length === 0) {
+            container.innerHTML = "<p style='text-align:center; padding:20px;'>No hay órdenes pendientes localmente.</p>";
+            return;
+        }
+
+        pendientes.forEach((p) => {
             const card = document.createElement('div');
             card.className = 'card';
             card.onclick = () => abrirCierreTech(p);
@@ -558,6 +592,15 @@
 
             // Guardar en cola de sincronización
             agregarAColaSync('CIERRE_TECNICO', reporte);
+
+            // Actualizar estado localmente para que desaparezca de "Pendientes"
+            pedidos = pedidos.map(p => {
+                if(p.id === currentPedidoId) {
+                    return {...p, estado: estado, tech_acciones: acciones, tech_obs: obs, tech_responsable: `${nombre} ${apellido}`};
+                }
+                return p;
+            });
+            localStorage.setItem('cache_pedidos', JSON.stringify(pedidos));
 
             alert("Reporte guardado. Se subirá a la nube en segundo plano.");
             
