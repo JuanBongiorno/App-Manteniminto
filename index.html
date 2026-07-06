@@ -198,6 +198,18 @@
             font-weight: bold;
             color: var(--amarillo);
         }
+
+        /* --- AGREGADO PARA OFFLINE --- */
+        #sync-badge {
+            background: var(--amarillo);
+            color: #000;
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            display: none;
+            font-weight: bold;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -205,7 +217,8 @@
 <div class="container">
     <header>
         <img src="logo.png" alt="SURAGUA" class="logo">
-        <div id="sync-status" style="font-size: 0.7rem; opacity: 0.7;">Conectado a la nube</div>
+        <div id="sync-status" style="font-size: 0.7rem; opacity: 0.7;">Sistema Integral Suragua</div>
+        <div id="sync-badge">Pendiente de subir: <span id="sync-count">0</span></div>
     </header>
 
     <!-- LOGIN -->
@@ -340,6 +353,11 @@
         
         // Ajuste inicial (puede fallar si está oculto)
         resizeCanvas();
+
+        // INICIAR SYNC OFFLINE
+        actualizarContadorSync();
+        setInterval(procesarColaSync, 15000); // Intenta sincronizar cada 15 seg
+        window.addEventListener('online', procesarColaSync);
     };
 
     // --- AGREGADO: FUNCION PARA QUE LA FIRMA NO FALLE ---
@@ -388,17 +406,29 @@
 
     // OPERACIONES DE DATOS
     async function cargarPedidos() {
-        const { data, error } = await _supabase
-            .from('pedidos')
-            .select('*')
-            .order('fecha', { ascending: false });
-        
-        if (error) {
-            console.error(error);
-            return [];
+        // Primero mostrar lo que tenemos localmente para fluidez instantánea
+        const local = localStorage.getItem('cache_pedidos');
+        if(local) {
+            pedidos = JSON.parse(local);
+            renderPedidos();
+            renderPedidosTech();
         }
-        pedidos = data;
-        return data;
+
+        try {
+            const { data, error } = await _supabase
+                .from('pedidos')
+                .select('*')
+                .order('fecha', { ascending: false });
+            
+            if (!error) {
+                pedidos = data;
+                localStorage.setItem('cache_pedidos', JSON.stringify(data));
+            }
+        } catch (e) {
+            console.log("Modo offline: usando cache local");
+        }
+        
+        return pedidos;
     }
 
     async function abrirGestion() {
@@ -428,25 +458,19 @@
             observaciones: document.getElementById('observaciones').value,
             contacto: document.getElementById('contacto').value,
             extra: document.getElementById('extra').value,
-            estado: 'AMARILLO'
+            estado: 'AMARILLO',
+            fecha: new Date().toISOString().split('T')[0]
         };
 
         if(!nuevo.dispenser_id || !nuevo.cliente_usuario) return alert("Faltan datos obligatorios");
         
-        btn.disabled = true;
-        btn.innerText = "GUARDANDO...";
-
-        const { error } = await _supabase.from('pedidos').insert([nuevo]);
-
-        if(error) {
-            alert("Error al guardar: " + error.message);
-        } else {
-            alert("Pedido guardado con éxito en la nube");
-            document.getElementById('form-pedido').reset();
-            backToMenu();
-        }
-        btn.disabled = false;
-        btn.innerText = "GUARDAR EN NUBE";
+        // --- LOGICA OFFLINE: GUARDAR EN COLA ---
+        agregarAColaSync('NUEVO_PEDIDO', nuevo);
+        
+        alert("Pedido guardado localmente. Se subirá automáticamente al detectar internet.");
+        document.getElementById('form-pedido').reset();
+        backToMenu();
+        procesarColaSync();
     }
 
     function renderPedidos() {
@@ -471,6 +495,7 @@
 
     function renderPedidosTech() {
         const container = document.getElementById('lista-pedidos-tech');
+        if(!container) return;
         container.innerHTML = "";
         pedidos.filter(p => p.estado === 'AMARILLO').forEach((p) => {
             const card = document.createElement('div');
@@ -494,11 +519,13 @@
         signaturePad.clear();
     }
 
+    // --- FINALIZAR PEDIDO (VERSION FLUIDA OFFLINE) ---
     async function finalizarPedido() {
         const btn = document.getElementById('btnFinalizar');
         const obs = document.getElementById('tech_obs').value;
         const acciones = document.getElementById('tech_acciones').value;
         const nombre = document.getElementById('tech_resp_nombre').value;
+        const apellido = document.getElementById('tech_resp_apellido').value;
         const fotoInput = document.getElementById('tech_foto');
         const estado = document.getElementById('tech_estado_final').value;
 
@@ -507,56 +534,146 @@
         }
 
         btn.disabled = true;
-        btn.innerText = "SUBIENDO REPORTE...";
+        btn.innerText = "PROCESANDO REPORTE...";
 
         try {
-            // 1. Subir Foto
+            // Convertir Foto a Base64 para guardado offline
             const fotoFile = fotoInput.files[0];
-            const fotoExt = fotoFile.name.split('.').pop();
-            const fotoNombre = `${Date.now()}_img.${fotoExt}`;
-            const { data: dFoto, error: eFoto } = await _supabase.storage.from('fotos').upload(fotoNombre, fotoFile);
-            if(eFoto) throw eFoto;
+            const fotoBase64 = await toBase64(fotoFile);
+            
+            // Convertir Firma a Base64
+            const firmaBase64 = signaturePad.toDataURL();
 
-            // 2. Subir Firma (Convertir a blob)
-            const firmaDataUrl = signaturePad.toDataURL();
-            const response = await fetch(firmaDataUrl);
-            const firmaBlob = await response.blob();
-            const firmaNombre = `${Date.now()}_firma.png`;
-            const { data: dFirma, error: eFirma } = await _supabase.storage.from('fotos').upload(firmaNombre, firmaBlob);
-            if(eFirma) throw eFirma;
-
-            // 3. Obtener URLs
-            const urlFoto = _supabase.storage.from('fotos').getPublicUrl(fotoNombre).data.publicUrl;
-            const urlFirma = _supabase.storage.from('fotos').getPublicUrl(firmaNombre).data.publicUrl;
-
-            // 4. Actualizar Base de Datos
-            const { error: eDB } = await _supabase.from('pedidos').update({
+            const reporte = {
+                id: currentPedidoId,
                 tech_obs: obs,
                 tech_acciones: acciones,
-                tech_responsable: `${nombre} ${document.getElementById('tech_resp_apellido').value}`,
-                tech_foto_url: urlFoto,
-                tech_firma_url: urlFirma,
-                estado: estado
-            }).eq('id', currentPedidoId);
+                tech_responsable: `${nombre} ${apellido}`,
+                tech_foto_base64: fotoBase64, // Guardamos el contenido real
+                tech_firma_base64: firmaBase64,
+                estado: estado,
+                foto_nombre: `${Date.now()}_img.png`,
+                firma_nombre: `${Date.now()}_firma.png`
+            };
 
-            if(eDB) throw eDB;
+            // Guardar en cola de sincronización
+            agregarAColaSync('CIERRE_TECNICO', reporte);
 
-            alert("Reporte finalizado y guardado en la nube.");
+            alert("Reporte guardado. Se subirá a la nube en segundo plano.");
+            
+            // Limpiar formulario y volver
+            document.getElementById('tech_obs').value = "";
+            document.getElementById('tech_acciones').value = "";
+            document.getElementById('tech_foto').value = "";
+            signaturePad.clear();
+            
             backToMenu();
+            procesarColaSync();
+
         } catch (err) {
-            alert("Error: " + err.message);
+            alert("Error al procesar localmente: " + err.message);
         } finally {
             btn.disabled = false;
             btn.innerText = "SUBIR REPORTE";
         }
     }
 
-    // --- FUNCIÓN ACTUALIZADA PARA DISEÑO DE FOTO ---
+    // UTILS
+    const toBase64 = file => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+
+    // --- SISTEMA DE SINCRONIZACIÓN EN SEGUNDO PLANO ---
+    function agregarAColaSync(tipo, data) {
+        let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+        cola.push({ tipo, data, timestamp: Date.now() });
+        localStorage.setItem('sync_queue', JSON.stringify(cola));
+        actualizarContadorSync();
+    }
+
+    function actualizarContadorSync() {
+        const cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+        const badge = document.getElementById('sync-badge');
+        const count = document.getElementById('sync-count');
+        const status = document.getElementById('sync-status');
+        
+        if(cola.length > 0) {
+            badge.style.display = 'block';
+            count.innerText = cola.length;
+            status.innerText = "Sincronizando pendientes...";
+        } else {
+            badge.style.display = 'none';
+            status.innerText = "Sincronizado con la nube";
+        }
+    }
+
+    let isSyncing = false;
+    async function procesarColaSync() {
+        if(isSyncing || !navigator.onLine) return;
+        
+        let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+        if(cola.length === 0) return;
+
+        isSyncing = true;
+        const item = cola[0]; // Procesamos de a uno
+
+        try {
+            if(item.tipo === 'NUEVO_PEDIDO') {
+                const { error } = await _supabase.from('pedidos').insert([item.data]);
+                if(error) throw error;
+            } 
+            else if(item.tipo === 'CIERRE_TECNICO') {
+                const d = item.data;
+                
+                // 1. Subir Foto desde Base64
+                const resFoto = await fetch(d.tech_foto_base64);
+                const blobFoto = await resFoto.blob();
+                await _supabase.storage.from('fotos').upload(d.foto_nombre, blobFoto);
+                const urlFoto = _supabase.storage.from('fotos').getPublicUrl(d.foto_nombre).data.publicUrl;
+
+                // 2. Subir Firma desde Base64
+                const resFirma = await fetch(d.tech_firma_base64);
+                const blobFirma = await resFirma.blob();
+                await _supabase.storage.from('fotos').upload(d.firma_nombre, blobFirma);
+                const urlFirma = _supabase.storage.from('fotos').getPublicUrl(d.firma_nombre).data.publicUrl;
+
+                // 3. Update DB
+                const { error: eDB } = await _supabase.from('pedidos').update({
+                    tech_obs: d.tech_obs,
+                    tech_acciones: d.tech_acciones,
+                    tech_responsable: d.tech_responsable,
+                    tech_foto_url: urlFoto,
+                    tech_firma_url: urlFirma,
+                    estado: d.estado
+                }).eq('id', d.id);
+                
+                if(eDB) throw eDB;
+            }
+
+            // Si tuvo éxito, eliminar de la cola
+            cola.shift();
+            localStorage.setItem('sync_queue', JSON.stringify(cola));
+            console.log("Item sincronizado con éxito");
+            
+        } catch (err) {
+            console.error("Error en sync, reintentando luego:", err);
+        } finally {
+            isSyncing = false;
+            actualizarContadorSync();
+            // Si quedan items, seguir procesando
+            if(cola.length > 0) setTimeout(procesarColaSync, 1000);
+        }
+    }
+
+    // --- DISEÑO DE DETALLE ---
     function verDetalle(p) {
         const modal = document.getElementById('modal-detalle');
         const content = document.getElementById('modal-content-body');
         currentPedidoId = p.dispenser_id;
-        currentPedidoData = p; // Guardar para compartir texto
+        currentPedidoData = p; 
         
         content.innerHTML = `
             <h2>Reporte de Servicio</h2>
@@ -580,7 +697,6 @@
         modal.style.display = 'block';
     }
 
-    // --- COMPARTIR SOLO TEXTO (DATOS COMPLETADOS Y VERTICALES) ---
     function compartirSoloTexto(tipo) {
         const p = currentPedidoData;
         if(!p) return;
@@ -603,7 +719,6 @@
         }
     }
 
-    // --- DESCARGAR REPORTE VISUAL COMPLETO (CORREGIDO PARA EVITAR SHARE FAILED) ---
     async function descargarReporteCompleto() {
         const area = document.getElementById('area-a-capturar');
         const btn = document.getElementById('btnFullFoto');
@@ -624,7 +739,6 @@
             const blob = await (await fetch(dataUrl)).blob();
             const file = new File([blob], `Reporte_SURAGUA_${currentPedidoId}.png`, { type: 'image/png' });
 
-            // Intentar compartir primero
             if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
                 try {
                     await navigator.share({
@@ -633,11 +747,9 @@
                         text: `Reporte visual completo del equipo ID ${currentPedidoId}`
                     });
                 } catch (shareErr) {
-                    // Si el usuario cancela o hay un error de sistema, pasamos a descarga directa
                     realizarDescargaDirecta(dataUrl);
                 }
             } else {
-                // Si el navegador no soporta compartir (Desktop o No-HTTPS)
                 realizarDescargaDirecta(dataUrl);
             }
         } catch (e) {
@@ -659,8 +771,6 @@
     }
 
     function cerrarModal() { document.getElementById('modal-detalle').style.display = 'none'; }
-
-    // --- FUNCIONES ORIGINALES ---
     function generarYCompartir(tipo) {}
     function compartirWhatsApp(id, estado, cliente, acciones) {}
     function enviarEmail(id, cliente, estado) {}
