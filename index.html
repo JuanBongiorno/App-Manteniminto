@@ -1,4 +1,4 @@
-- V 1.0.1 -
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -549,8 +549,12 @@
             <p><strong>DATOS DEL PEDIDO:</strong></p>
             <p>ID Dispenser: ${p.dispenser_id}</p>
             <p>Usuario: ${p.cliente_usuario}</p>
+            <p>Sector: ${p.sector || '---'}</p>
+            <p>Lugar: ${p.lugar || '---'}</p>
             <p>Falla: ${p.desperfecto}</p>
+            <p>Obs. Pedido: ${p.observaciones || '---'}</p>
             <p>Contacto: ${p.contacto || 'N/A'}</p>
+            <p>Extra: ${p.extra || '---'}</p>
         `;
         showSection('cierre-tech-view');
         signaturePad.clear();
@@ -727,7 +731,12 @@
             <p><span class="label">Fecha:</span> ${p.fecha}</p>
             <p><span class="label">ID Dispenser:</span> ${p.dispenser_id}</p>
             <p><span class="label">Cliente:</span> ${p.cliente_usuario}</p>
+            <p><span class="label">Sector:</span> ${p.sector || '---'}</p>
+            <p><span class="label">Lugar Específico:</span> ${p.lugar || '---'}</p>
             <p><span class="label">Falla Reportada:</span> ${p.desperfecto}</p>
+            <p><span class="label">Observaciones Pedido:</span> ${p.observaciones || '---'}</p>
+            <p><span class="label">Contacto:</span> ${p.contacto || '---'}</p>
+            <p><span class="label">Extra:</span> ${p.extra || '---'}</p>
             <hr>
             <p><span class="label">ESTADO FINAL:</span> ${p.estado}</p>
             <p><span class="label">Responsable:</span> ${p.tech_responsable || '---'}</p>
@@ -750,6 +759,8 @@
         const mensaje = `*REPORTE DE SERVICIO SURAGUA*\n\n` +
             `*ID Dispenser:* ${p.dispenser_id}\n` +
             `*Cliente:* ${p.cliente_usuario}\n` +
+            `*Sector:* ${p.sector || '---'}\n` +
+            `*Lugar:* ${p.lugar || '---'}\n` +
             `*Falla:* ${p.desperfecto}\n` +
             `*Estado:* ${p.estado}\n` +
             `*Responsable:* ${p.tech_responsable || '---'}\n` +
