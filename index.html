@@ -1,3 +1,5 @@
+--- START OF FILE Paste July 14, 2026 - 10:41AM ---
+
 
 <!DOCTYPE html>
 <html lang="es">
@@ -13,6 +15,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- HTML2Canvas para capturar el reporte -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- AGREGADO: LocalForage para evitar límite de 5MB de localStorage -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
     
     <style>
         :root {
@@ -344,22 +348,31 @@
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJxYWJldXVyZXBhZXpydnJ2amxzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwODM1ODIsImV4cCI6MjA5ODY1OTU4Mn0.V7IbAR36FGDwaagJ9rgfq3mKphdr6Kr1ayZtxpiCFyg'; 
     const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+    // CONFIGURACIÓN LOCALFORAGE (INDEXEDDB)
+    localforage.config({
+        name: 'SuraguaSystem',
+        storeName: 'offline_store'
+    });
+
     let pedidos = [];
     let currentUser = null;
     let currentPedidoId = null;
     let currentPedidoData = null;
     let signaturePad;
 
-    window.onload = () => {
+    window.onload = async () => {
         const canvas = document.getElementById('signature-pad');
         signaturePad = new SignaturePad(canvas);
         signaturePad.penColor = "rgb(0, 0, 0)"; // FIRMA EN NEGRO
         
         // Carga inicial forzada desde cache para que no esté vacío al abrir
-        const local = localStorage.getItem('cache_pedidos');
-        if(local) {
-            pedidos = JSON.parse(local);
-            console.log("Datos cargados desde cache al iniciar");
+        // MODIFICADO: Usar localforage en vez de localStorage
+        // const local = localStorage.getItem('cache_pedidos');
+        const localData = await localforage.getItem('cache_pedidos');
+        if(localData) {
+            // pedidos = JSON.parse(local);
+            pedidos = localData;
+            console.log("Datos cargados desde IndexedDB al iniciar");
         }
 
         // Ajuste inicial (puede fallar si está oculto)
@@ -420,9 +433,12 @@
     // OPERACIONES DE DATOS
     async function cargarPedidos() {
         // Primero mostrar lo que tenemos localmente para fluidez instantánea
-        const local = localStorage.getItem('cache_pedidos');
-        if(local) {
-            pedidos = JSON.parse(local);
+        // MODIFICADO: Usar localforage
+        // const local = localStorage.getItem('cache_pedidos');
+        const localData = await localforage.getItem('cache_pedidos');
+        if(localData) {
+            // pedidos = JSON.parse(local);
+            pedidos = localData;
             renderPedidos();
             renderPedidosTech();
         }
@@ -436,7 +452,8 @@
             
             if (!error && data) {
                 pedidos = data;
-                localStorage.setItem('cache_pedidos', JSON.stringify(data));
+                // localStorage.setItem('cache_pedidos', JSON.stringify(data));
+                await localforage.setItem('cache_pedidos', data);
                 renderPedidos();
                 renderPedidosTech();
             }
@@ -484,11 +501,12 @@
         if(!nuevo.dispenser_id || !nuevo.cliente_usuario) return alert("Faltan datos obligatorios");
         
         // --- LOGICA OFFLINE: GUARDAR EN COLA ---
-        agregarAColaSync('NUEVO_PEDIDO', nuevo);
+        await agregarAColaSync('NUEVO_PEDIDO', nuevo);
         
         // Actualizar vista local inmediatamente
         pedidos.unshift(nuevo);
-        localStorage.setItem('cache_pedidos', JSON.stringify(pedidos));
+        // localStorage.setItem('cache_pedidos', JSON.stringify(pedidos));
+        await localforage.setItem('cache_pedidos', pedidos);
 
         alert("Pedido guardado localmente. Se subirá automáticamente al detectar internet.");
         document.getElementById('form-pedido').reset();
@@ -598,7 +616,7 @@
             };
 
             // Guardar en cola de sincronización
-            agregarAColaSync('CIERRE_TECNICO', reporte);
+            await agregarAColaSync('CIERRE_TECNICO', reporte);
 
             // Actualizar estado localmente para que desaparezca de "Pendientes"
             pedidos = pedidos.map(p => {
@@ -607,7 +625,8 @@
                 }
                 return p;
             });
-            localStorage.setItem('cache_pedidos', JSON.stringify(pedidos));
+            // localStorage.setItem('cache_pedidos', JSON.stringify(pedidos));
+            await localforage.setItem('cache_pedidos', pedidos);
 
             alert("Reporte guardado. Se subirá a la nube en segundo plano.");
             
@@ -637,15 +656,18 @@
     });
 
     // --- SISTEMA DE SINCRONIZACIÓN EN SEGUNDO PLANO ---
-    function agregarAColaSync(tipo, data) {
-        let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+    async function agregarAColaSync(tipo, data) {
+        // let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+        let cola = await localforage.getItem('sync_queue') || [];
         cola.push({ tipo, data, timestamp: Date.now() });
-        localStorage.setItem('sync_queue', JSON.stringify(cola));
+        // localStorage.setItem('sync_queue', JSON.stringify(cola));
+        await localforage.setItem('sync_queue', cola);
         actualizarContadorSync();
     }
 
-    function actualizarContadorSync() {
-        const cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+    async function actualizarContadorSync() {
+        // const cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+        const cola = await localforage.getItem('sync_queue') || [];
         const badge = document.getElementById('sync-badge');
         const count = document.getElementById('sync-count');
         const status = document.getElementById('sync-status');
@@ -664,7 +686,8 @@
     async function procesarColaSync() {
         if(isSyncing || !navigator.onLine) return;
         
-        let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+        // let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+        let cola = await localforage.getItem('sync_queue') || [];
         if(cola.length === 0) return;
 
         isSyncing = true;
@@ -705,7 +728,8 @@
 
             // Si tuvo éxito, eliminar de la cola
             cola.shift();
-            localStorage.setItem('sync_queue', JSON.stringify(cola));
+            // localStorage.setItem('sync_queue', JSON.stringify(cola));
+            await localforage.setItem('sync_queue', cola);
             console.log("Item sincronizado con éxito");
             
         } catch (err) {
