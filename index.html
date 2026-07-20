@@ -1,5 +1,3 @@
---- START OF FILE Paste July 14, 2026 - 10:41AM ---
-
 
 <!DOCTYPE html>
 <html lang="es">
@@ -281,7 +279,11 @@
     <div id="gestion-view" class="view-section">
         <button onclick="backToMenu()" class="btn-secondary"><i class="fas fa-arrow-left"></i> Volver</button>
         <h2 style="margin: 15px 0;">Gestión de Pedidos</h2>
-        <input type="date" id="search-date" onchange="renderPedidos()">
+        <!-- MODIFICACIÓN: Contenedor de filtros -->
+        <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px;">
+            <input type="date" id="search-date" onchange="renderPedidos()" placeholder="Filtrar por fecha">
+            <input type="text" id="search-machine" onkeyup="renderPedidos()" placeholder="Buscar por ID de Máquina / Dispenser">
+        </div>
         <div id="loader-list" class="loader">Cargando datos...</div>
         <div id="lista-pedidos" style="margin-top:15px;"></div>
     </div>
@@ -517,13 +519,22 @@
     function renderPedidos() {
         const container = document.getElementById('lista-pedidos');
         if(!container) return;
+        
+        // MODIFICACIÓN: Capturar ambos valores de búsqueda
         const filterDate = document.getElementById('search-date').value;
+        const filterMachine = document.getElementById('search-machine').value.toLowerCase();
+        
         container.innerHTML = "";
         
-        const filtered = filterDate ? pedidos.filter(p => p.fecha === filterDate) : pedidos;
+        // MODIFICACIÓN: Filtrado combinado (Fecha + ID Máquina)
+        const filtered = pedidos.filter(p => {
+            const matchDate = filterDate ? p.fecha === filterDate : true;
+            const matchMachine = filterMachine ? (p.dispenser_id && p.dispenser_id.toString().toLowerCase().includes(filterMachine)) : true;
+            return matchDate && matchMachine;
+        });
 
         if(filtered.length === 0) {
-            container.innerHTML = "<p style='text-align:center; padding:20px;'>No hay datos disponibles localmente.</p>";
+            container.innerHTML = "<p style='text-align:center; padding:20px;'>No hay datos que coincidan con la búsqueda.</p>";
             return;
         }
 
