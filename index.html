@@ -252,6 +252,8 @@
     <div id="tech-view" class="view-section">
         <h3 style="text-align: center;">Panel Servicio Técnico</h3>
         <div class="menu-vertical">
+            <!-- AGREGADO: Carga de pedidos para técnico -->
+            <button onclick="showSection('carga-view')"><i class="fas fa-plus-circle"></i> Carga de Pedidos</button>
             <button onclick="abrirPedidosTech()"><i class="fas fa-tools"></i> Órdenes de Trabajo</button>
             <button onclick="abrirGestion()"><i class="fas fa-search"></i> Buscar Pedidos</button>
             <button onclick="logout()" style="background: var(--rojo); margin-top: 20px;"><i class="fas fa-power-off"></i> Cerrar Sesión</button>
@@ -283,6 +285,8 @@
         <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px;">
             <input type="date" id="search-date" onchange="renderPedidos()" placeholder="Filtrar por fecha">
             <input type="text" id="search-machine" onkeyup="renderPedidos()" placeholder="Buscar por ID de Máquina / Dispenser">
+            <!-- AGREGADO: Botón para resetear filtros -->
+            <button onclick="resetearFiltros()" style="padding: 8px; font-size: 0.8rem; background: #666;"><i class="fas fa-undo"></i> Limpiar Filtros</button>
         </div>
         <div id="loader-list" class="loader">Cargando datos...</div>
         <div id="lista-pedidos" style="margin-top:15px;"></div>
@@ -469,11 +473,21 @@
         return pedidos;
     }
 
+    // MODIFICADO: Ahora limpia los inputs al abrir para que la fecha no esté activa por defecto
     async function abrirGestion() {
+        document.getElementById('search-date').value = "";
+        document.getElementById('search-machine').value = "";
         showSection('gestion-view');
         document.getElementById('loader-list').style.display = 'block';
         await cargarPedidos();
         document.getElementById('loader-list').style.display = 'none';
+        renderPedidos();
+    }
+
+    // AGREGADO: Función para resetear filtros manualmente
+    function resetearFiltros() {
+        document.getElementById('search-date').value = "";
+        document.getElementById('search-machine').value = "";
         renderPedidos();
     }
 
