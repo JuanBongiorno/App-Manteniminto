@@ -684,7 +684,7 @@
     async function agregarAColaSync(tipo, data) {
         // let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
         let cola = await localforage.getItem('sync_queue') || [];
-        cola.push({ tipo, data, timestamp: Date.now() });
+        cola.push({ tipo, data, timestamp: Date.now(), intentos: 0 }); // AGREGADO intentos
         // localStorage.setItem('sync_queue', JSON.stringify(cola));
         await localforage.setItem('sync_queue', cola);
         actualizarContadorSync();
@@ -759,6 +759,13 @@
             
         } catch (err) {
             console.error("Error en sync, reintentando luego:", err);
+            // AJUSTE PARA DESTRABAR: Si falla 3 veces, lo mandamos al final de la cola para que pasen los demás
+            item.intentos = (item.intentos || 0) + 1;
+            if (item.intentos >= 3) {
+                cola.shift(); // Lo quita del principio
+                cola.push(item); // Lo pone al final
+            }
+            await localforage.setItem('sync_queue', cola);
         } finally {
             isSyncing = false;
             actualizarContadorSync();
