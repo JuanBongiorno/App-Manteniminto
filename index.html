@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -372,21 +371,19 @@
         signaturePad.penColor = "rgb(0, 0, 0)"; // FIRMA EN NEGRO
         
         // Carga inicial forzada desde cache para que no esté vacío al abrir
-        // MODIFICADO: Usar localforage en vez de localStorage
-        // const local = localStorage.getItem('cache_pedidos');
         const localData = await localforage.getItem('cache_pedidos');
         if(localData) {
-            // pedidos = JSON.parse(local);
             pedidos = localData;
             console.log("Datos cargados desde IndexedDB al iniciar");
         }
 
-        // Ajuste inicial (puede fallar si está oculto)
+        // Ajuste inicial
         resizeCanvas();
 
         // INICIAR SYNC OFFLINE
         actualizarContadorSync();
-        setInterval(procesarColaSync, 15000); // Intenta sincronizar cada 15 seg
+        // Cambiado a 5 segundos para que empiece más rápido al recuperar señal
+        setInterval(procesarColaSync, 5000); 
         window.addEventListener('online', procesarColaSync);
     };
 
@@ -439,18 +436,14 @@
     // OPERACIONES DE DATOS
     async function cargarPedidos() {
         // Primero mostrar lo que tenemos localmente para fluidez instantánea
-        // MODIFICADO: Usar localforage
-        // const local = localStorage.getItem('cache_pedidos');
         const localData = await localforage.getItem('cache_pedidos');
         if(localData) {
-            // pedidos = JSON.parse(local);
             pedidos = localData;
             renderPedidos();
             renderPedidosTech();
         }
 
         try {
-            // No bloqueamos la ejecución si no hay internet (usando un timeout corto o manejo de error)
             const { data, error } = await _supabase
                 .from('pedidos')
                 .select('*')
@@ -458,14 +451,12 @@
             
             if (!error && data) {
                 pedidos = data;
-                // localStorage.setItem('cache_pedidos', JSON.stringify(data));
                 await localforage.setItem('cache_pedidos', data);
                 renderPedidos();
                 renderPedidosTech();
             }
         } catch (e) {
             console.log("Modo offline o error de red: usando cache local");
-            // Aun con error, nos aseguramos que renderPedidos use lo que hay en memoria
             renderPedidos();
             renderPedidosTech();
         }
@@ -473,7 +464,6 @@
         return pedidos;
     }
 
-    // MODIFICADO: Ahora limpia los inputs al abrir para que la fecha no esté activa por defecto
     async function abrirGestion() {
         document.getElementById('search-date').value = "";
         document.getElementById('search-machine').value = "";
@@ -484,7 +474,6 @@
         renderPedidos();
     }
 
-    // AGREGADO: Función para resetear filtros manualmente
     function resetearFiltros() {
         document.getElementById('search-date').value = "";
         document.getElementById('search-machine').value = "";
@@ -521,7 +510,6 @@
         
         // Actualizar vista local inmediatamente
         pedidos.unshift(nuevo);
-        // localStorage.setItem('cache_pedidos', JSON.stringify(pedidos));
         await localforage.setItem('cache_pedidos', pedidos);
 
         alert("Pedido guardado localmente. Se subirá automáticamente al detectar internet.");
@@ -534,13 +522,11 @@
         const container = document.getElementById('lista-pedidos');
         if(!container) return;
         
-        // MODIFICACIÓN: Capturar ambos valores de búsqueda
         const filterDate = document.getElementById('search-date').value;
         const filterMachine = document.getElementById('search-machine').value.toLowerCase();
         
         container.innerHTML = "";
         
-        // MODIFICACIÓN: Filtrado combinado (Fecha + ID Máquina)
         const filtered = pedidos.filter(p => {
             const matchDate = filterDate ? p.fecha === filterDate : true;
             const matchMachine = filterMachine ? (p.dispenser_id && p.dispenser_id.toString().toLowerCase().includes(filterMachine)) : true;
@@ -603,7 +589,6 @@
         signaturePad.clear();
     }
 
-    // --- FINALIZAR PEDIDO (VERSION FLUIDA OFFLINE) ---
     async function finalizarPedido() {
         const btn = document.getElementById('btnFinalizar');
         const obs = document.getElementById('tech_obs').value;
@@ -621,11 +606,8 @@
         btn.innerText = "PROCESANDO REPORTE...";
 
         try {
-            // Convertir Foto a Base64 para guardado offline
             const fotoFile = fotoInput.files[0];
             const fotoBase64 = await toBase64(fotoFile);
-            
-            // Convertir Firma a Base64
             const firmaBase64 = signaturePad.toDataURL();
 
             const reporte = {
@@ -633,29 +615,25 @@
                 tech_obs: obs,
                 tech_acciones: acciones,
                 tech_responsable: `${nombre} ${apellido}`,
-                tech_foto_base64: fotoBase64, // Guardamos el contenido real
+                tech_foto_base64: fotoBase64, 
                 tech_firma_base64: firmaBase64,
                 estado: estado,
                 foto_nombre: `${Date.now()}_img.png`,
                 firma_nombre: `${Date.now()}_firma.png`
             };
 
-            // Guardar en cola de sincronización
             await agregarAColaSync('CIERRE_TECNICO', reporte);
 
-            // Actualizar estado localmente para que desaparezca de "Pendientes"
             pedidos = pedidos.map(p => {
                 if(p.id === currentPedidoId) {
                     return {...p, estado: estado, tech_acciones: acciones, tech_obs: obs, tech_responsable: `${nombre} ${apellido}`};
                 }
                 return p;
             });
-            // localStorage.setItem('cache_pedidos', JSON.stringify(pedidos));
             await localforage.setItem('cache_pedidos', pedidos);
 
             alert("Reporte guardado. Se subirá a la nube en segundo plano.");
             
-            // Limpiar formulario y volver
             document.getElementById('tech_obs').value = "";
             document.getElementById('tech_acciones').value = "";
             document.getElementById('tech_foto').value = "";
@@ -672,7 +650,6 @@
         }
     }
 
-    // UTILS
     const toBase64 = file => new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -680,18 +657,14 @@
         reader.onerror = error => reject(error);
     });
 
-    // --- SISTEMA DE SINCRONIZACIÓN EN SEGUNDO PLANO ---
     async function agregarAColaSync(tipo, data) {
-        // let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
         let cola = await localforage.getItem('sync_queue') || [];
-        cola.push({ tipo, data, timestamp: Date.now(), intentos: 0 }); // AGREGADO intentos
-        // localStorage.setItem('sync_queue', JSON.stringify(cola));
+        cola.push({ tipo, data, timestamp: Date.now(), intentos: 0 }); 
         await localforage.setItem('sync_queue', cola);
         actualizarContadorSync();
     }
 
     async function actualizarContadorSync() {
-        // const cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
         const cola = await localforage.getItem('sync_queue') || [];
         const badge = document.getElementById('sync-badge');
         const count = document.getElementById('sync-count');
@@ -709,69 +682,77 @@
 
     let isSyncing = false;
     async function procesarColaSync() {
+        // Bloqueo si ya está subiendo o si no hay internet REAL
         if(isSyncing || !navigator.onLine) return;
         
-        // let cola = JSON.parse(localStorage.getItem('sync_queue') || '[]');
         let cola = await localforage.getItem('sync_queue') || [];
         if(cola.length === 0) return;
 
         isSyncing = true;
-        const item = cola[0]; // Procesamos de a uno
+        
+        // MOTOR DE SINCRONIZACION MASIVO: Mientras haya internet y elementos en cola
+        while(cola.length > 0 && navigator.onLine) {
+            const item = cola[0]; 
 
-        try {
-            if(item.tipo === 'NUEVO_PEDIDO') {
-                const { error } = await _supabase.from('pedidos').insert([item.data]);
-                if(error) throw error;
-            } 
-            else if(item.tipo === 'CIERRE_TECNICO') {
-                const d = item.data;
+            try {
+                if(item.tipo === 'NUEVO_PEDIDO') {
+                    const { error } = await _supabase.from('pedidos').insert([item.data]);
+                    if(error) throw error;
+                } 
+                else if(item.tipo === 'CIERRE_TECNICO') {
+                    const d = item.data;
+                    
+                    // 1. Subir Foto
+                    const resFoto = await fetch(d.tech_foto_base64);
+                    const blobFoto = await resFoto.blob();
+                    const { error: errF } = await _supabase.storage.from('fotos').upload(d.foto_nombre, blobFoto);
+                    // Si el error es que ya existe, lo ignoramos y seguimos
+                    if(errF && errF.message !== "The resource already exists") throw errF;
+                    const urlFoto = _supabase.storage.from('fotos').getPublicUrl(d.foto_nombre).data.publicUrl;
+
+                    // 2. Subir Firma
+                    const resFirma = await fetch(d.tech_firma_base64);
+                    const blobFirma = await resFirma.blob();
+                    const { error: errS } = await _supabase.storage.from('fotos').upload(d.firma_nombre, blobFirma);
+                    if(errS && errS.message !== "The resource already exists") throw errS;
+                    const urlFirma = _supabase.storage.from('fotos').getPublicUrl(d.firma_nombre).data.publicUrl;
+
+                    // 3. Update DB
+                    const { error: eDB } = await _supabase.from('pedidos').update({
+                        tech_obs: d.tech_obs,
+                        tech_acciones: d.tech_acciones,
+                        tech_responsable: d.tech_responsable,
+                        tech_foto_url: urlFoto,
+                        tech_firma_url: urlFirma,
+                        estado: d.estado
+                    }).eq('id', d.id);
+                    
+                    if(eDB) throw eDB;
+                }
+
+                // Si tuvo éxito, eliminar de la cabeza de la cola
+                cola.shift();
+                await localforage.setItem('sync_queue', cola);
+                actualizarContadorSync();
+                console.log("Elemento subido con éxito");
                 
-                // 1. Subir Foto desde Base64
-                const resFoto = await fetch(d.tech_foto_base64);
-                const blobFoto = await resFoto.blob();
-                await _supabase.storage.from('fotos').upload(d.foto_nombre, blobFoto);
-                const urlFoto = _supabase.storage.from('fotos').getPublicUrl(d.foto_nombre).data.publicUrl;
-
-                // 2. Subir Firma desde Base64
-                const resFirma = await fetch(d.tech_firma_base64);
-                const blobFirma = await resFirma.blob();
-                await _supabase.storage.from('fotos').upload(d.firma_nombre, blobFirma);
-                const urlFirma = _supabase.storage.from('fotos').getPublicUrl(d.firma_nombre).data.publicUrl;
-
-                // 3. Update DB
-                const { error: eDB } = await _supabase.from('pedidos').update({
-                    tech_obs: d.tech_obs,
-                    tech_acciones: d.tech_acciones,
-                    tech_responsable: d.tech_responsable,
-                    tech_foto_url: urlFoto,
-                    tech_firma_url: urlFirma,
-                    estado: d.estado
-                }).eq('id', d.id);
+            } catch (err) {
+                console.error("Error en sync de este item, lo pasamos al final:", err);
+                item.intentos = (item.intentos || 0) + 1;
                 
-                if(eDB) throw eDB;
+                cola.shift(); // Lo quita de adelante
+                if (item.intentos < 5) {
+                    cola.push(item); // Lo manda al final para no trabar el resto
+                }
+                await localforage.setItem('sync_queue', cola);
+                
+                // Si hubo un error, rompemos el bucle para reintentar en el próximo intervalo
+                break; 
             }
-
-            // Si tuvo éxito, eliminar de la cola
-            cola.shift();
-            // localStorage.setItem('sync_queue', JSON.stringify(cola));
-            await localforage.setItem('sync_queue', cola);
-            console.log("Item sincronizado con éxito");
-            
-        } catch (err) {
-            console.error("Error en sync, reintentando luego:", err);
-            // AJUSTE PARA DESTRABAR: Si falla 3 veces, lo mandamos al final de la cola para que pasen los demás
-            item.intentos = (item.intentos || 0) + 1;
-            if (item.intentos >= 3) {
-                cola.shift(); // Lo quita del principio
-                cola.push(item); // Lo pone al final
-            }
-            await localforage.setItem('sync_queue', cola);
-        } finally {
-            isSyncing = false;
-            actualizarContadorSync();
-            // Si quedan items, seguir procesando
-            if(cola.length > 0) setTimeout(procesarColaSync, 1000);
         }
+        
+        isSyncing = false;
+        actualizarContadorSync();
     }
 
     // --- DISEÑO DE DETALLE ---
