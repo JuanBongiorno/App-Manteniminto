@@ -525,25 +525,8 @@
                 .order('fecha', { ascending: false });
             
             if (!error && data) {
-                // Normalizar estados que pueda devolver el servidor
-                let serverPedidos = data.map(p => ({ ...p, estado: mapEstadoFromServer(p.estado) }));
-
-                // Fusionar con pedidos locales que pueden estar en la cola (NUEVO_PEDIDO)
-                try {
-                    const cola = await localforage.getItem('sync_queue') || [];
-                    const nuevosLocales = cola.filter(i => i.tipo === 'NUEVO_PEDIDO').map(i => i.data || i);
-                    // Añadir los locales al inicio si no están ya en serverPedidos (comparar por local_id o id)
-                    for (const nl of nuevosLocales) {
-                        const exists = serverPedidos.some(sp => (sp.id && nl.id && sp.id === nl.id) || (nl.local_id && (sp.local_id === nl.local_id || sp.id === nl.local_id)) );
-                        if (!exists) {
-                            // mantener estado y local_id para que se muestre como pendiente
-                            serverPedidos.unshift(nl);
-                        }
-                    }
-                } catch(e) { console.warn('No se pudo obtener cola para fusionar:', e); }
-
-                pedidos = serverPedidos;
-                await localforage.setItem('cache_pedidos', pedidos);
+                pedidos = data;
+                await localforage.setItem('cache_pedidos', data);
                 renderPedidos();
                 renderPedidosTech();
             }
@@ -792,122 +775,77 @@
 
     let isSyncing = false;
     async function procesarColaSync() {
-        if (isSyncing || !navigator.onLine) return;
-
+        // Bloqueo si ya está subiendo o si no hay internet REAL
+        if(isSyncing || !navigator.onLine) return;
+        
         let cola = await localforage.getItem('sync_queue') || [];
         if (cola.length === 0) return;
 
         isSyncing = true;
+        
+        // MOTOR DE SINCRONIZACION MASIVO: Mientras haya internet y elementos en cola
+        while(cola.length > 0 && navigator.onLine) {
+            const item = cola[0]; 
 
-        try {
-            while (cola.length > 0 && navigator.onLine) {
-                const item = cola[0];
+            try {
+                if(item.tipo === 'NUEVO_PEDIDO') {
+                    const { error } = await _supabase.from('pedidos').insert([item.data]);
+                    if(error) throw error;
+                } 
+                else if(item.tipo === 'CIERRE_TECNICO') {
+                    const d = item.data;
+                    
+                    // 1. Subir Foto
+                    const resFoto = await fetch(d.tech_foto_base64);
+                    const blobFoto = await resFoto.blob();
+                    const { error: errF } = await _supabase.storage.from('fotos').upload(d.foto_nombre, blobFoto);
+                    // Si el error es que ya existe, lo ignoramos y seguimos
+                    if(errF && errF.message !== "The resource already exists") throw errF;
+                    const urlFoto = _supabase.storage.from('fotos').getPublicUrl(d.foto_nombre).data.publicUrl;
 
-                try {
-                    if (item.tipo === 'NUEVO_PEDIDO') {
-                        // Preparar payload y mapear estado a lo que espere el servidor
-                        const payload = { ...item.data };
-                        const localId = payload.local_id || payload.id;
-                        payload.estado = mapEstadoToServer(payload.estado);
+                    // 2. Subir Firma
+                    const resFirma = await fetch(d.tech_firma_base64);
+                    const blobFirma = await resFirma.blob();
+                    const { error: errS } = await _supabase.storage.from('fotos').upload(d.firma_nombre, blobFirma);
+                    if(errS && errS.message !== "The resource already exists") throw errS;
+                    const urlFirma = _supabase.storage.from('fotos').getPublicUrl(d.firma_nombre).data.publicUrl;
 
-                        const { data: inserted, error } = await _supabase.from('pedidos').insert([payload]).select().single();
-                        if (error) throw error;
-
-                        // Actualizar cache local reemplazando el registro local por el devuelto por el servidor
-                        let cache = await localforage.getItem('cache_pedidos') || [];
-                        cache = cache.map(p => {
-                            if (p.id === localId || p.local_id === localId) {
-                                return { ...inserted, estado: mapEstadoFromServer(inserted.estado) };
-                            }
-                            return p;
-                        });
-                        await localforage.setItem('cache_pedidos', cache);
-                        pedidos = cache;
-
-                        // Actualizar otros elementos en cola que referencien este localId (ej. cierres)
-                        for (let q of cola) {
-                            if (q.data && (q.data.id === localId || q.data.local_id === localId)) {
-                                q.data.id = inserted.id;
-                                if (q.data.local_id) delete q.data.local_id;
-                            }
-                        }
-                    } else if (item.tipo === 'CIERRE_TECNICO') {
-                        const d = item.data;
-
-                        // Si el id aún es local, intentar resolverlo desde la cache
-                        if (typeof d.id === 'string' && d.id.startsWith('local_')) {
-                            const cache = await localforage.getItem('cache_pedidos') || [];
-                            const mapped = cache.find(p => p.local_id === d.id || p.id === d.id);
-                            if (mapped && mapped.id && !(mapped.id.toString().startsWith('local_'))) {
-                                d.id = mapped.id;
-                            } else {
-                                // No tenemos aún el id real -> reintentar luego
-                                throw new Error('ID del pedido aún no disponible en servidor');
-                            }
-                        }
-
-                        // 1. Subir Foto
-                        const resFoto = await fetch(d.tech_foto_base64);
-                        const blobFoto = await resFoto.blob();
-                        const { error: errF } = await _supabase.storage.from('fotos').upload(d.foto_nombre, blobFoto);
-                        if (errF && errF.message !== 'The resource already exists') throw errF;
-                        const urlFoto = _supabase.storage.from('fotos').getPublicUrl(d.foto_nombre).data.publicUrl;
-
-                        // 2. Subir Firma
-                        const resFirma = await fetch(d.tech_firma_base64);
-                        const blobFirma = await resFirma.blob();
-                        const { error: errS } = await _supabase.storage.from('fotos').upload(d.firma_nombre, blobFirma);
-                        if (errS && errS.message !== 'The resource already exists') throw errS;
-                        const urlFirma = _supabase.storage.from('fotos').getPublicUrl(d.firma_nombre).data.publicUrl;
-
-                        // 3. Update DB (estado ya viene mapeado cuando se encoló)
-                        const { error: eDB } = await _supabase.from('pedidos').update({
-                            tech_obs: d.tech_obs,
-                            tech_acciones: d.tech_acciones,
-                            tech_responsable: d.tech_responsable,
-                            tech_foto_url: urlFoto,
-                            tech_firma_url: urlFirma,
-                            estado: d.estado
-                        }).eq('id', d.id);
-
-                        if (eDB) throw eDB;
-
-                        // También actualizar la cache local con los nuevos URLs y estado (a representación cliente)
-                        let cache2 = await localforage.getItem('cache_pedidos') || [];
-                        cache2 = cache2.map(p => {
-                            if (p.id === d.id || p.local_id === d.id) {
-                                return { ...p, tech_obs: d.tech_obs, tech_acciones: d.tech_acciones, tech_responsable: d.tech_responsable, tech_foto_url: urlFoto, tech_firma_url: urlFirma, estado: mapEstadoFromServer(d.estado) };
-                            }
-                            return p;
-                        });
-                        await localforage.setItem('cache_pedidos', cache2);
-                        pedidos = cache2;
-                    }
-
-                    // Si tuvo éxito, eliminar de la cabeza de la cola
-                    cola.shift();
-                    await localforage.setItem('sync_queue', cola);
-                    await actualizarContadorSync();
-                    console.log('Elemento subido con éxito');
-
-                } catch (err) {
-                    console.error('Error en sync de este item, lo pasamos al final:', err);
-                    item.intentos = (item.intentos || 0) + 1;
-
-                    cola.shift(); // Lo quita de adelante
-                    if (item.intentos < 5) {
-                        cola.push(item); // Lo manda al final para no trabar el resto
-                    }
-                    await localforage.setItem('sync_queue', cola);
-
-                    // Si hubo un error, rompemos el bucle para reintentar en el próximo intervalo
-                    break;
+                    // 3. Update DB
+                    const { error: eDB } = await _supabase.from('pedidos').update({
+                        tech_obs: d.tech_obs,
+                        tech_acciones: d.tech_acciones,
+                        tech_responsable: d.tech_responsable,
+                        tech_foto_url: urlFoto,
+                        tech_firma_url: urlFirma,
+                        estado: d.estado
+                    }).eq('id', d.id);
+                    
+                    if(eDB) throw eDB;
                 }
+
+                // Si tuvo éxito, eliminar de la cabeza de la cola
+                cola.shift();
+                await localforage.setItem('sync_queue', cola);
+                actualizarContadorSync();
+                console.log("Elemento subido con éxito");
+                
+            } catch (err) {
+                console.error("Error en sync de este item, lo pasamos al final:", err);
+                item.intentos = (item.intentos || 0) + 1;
+                
+                cola.shift(); // Lo quita de adelante
+                if (item.intentos < 5) {
+                    cola.push(item); // Lo manda al final para no trabar el resto
+                }
+                await localforage.setItem('sync_queue', cola);
+                
+                // Si hubo un error, rompemos el bucle para reintentar en el próximo intervalo
+                break; 
             }
-        } finally {
-            isSyncing = false;
-            actualizarContadorSync();
         }
+        
+        isSyncing = false;
+        actualizarContadorSync();
     }
 
     // --- DISEÑO DE DETALLE ---
