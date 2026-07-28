@@ -396,7 +396,7 @@
     });
 
     let pedidos = [];
-    let currentUser = null;
+    window.currentUser = null;
     let currentPedidoId = null;
     let currentPedidoData = null;
     let signaturePad;
@@ -478,11 +478,11 @@
         const p = document.getElementById('pass').value;
 
         if (u === "admin" && p === "oficina3876") {
-            currentUser = "admin";
+            window.currentUser = "admin";
             cargarPedidos(); // Dispara carga de fondo
             showSection('admin-view');
         } else if (u === "servicio tecnico" && p === "broncel3876") {
-            currentUser = "tech";
+            window.currentUser = "tech";
             cargarPedidos(); // Dispara carga de fondo
             showSection('tech-view');
         } else {
@@ -491,7 +491,7 @@
     }
 
     function logout() {
-        currentUser = null;
+        window.currentUser = null;
         document.getElementById('pass').value = "";
         showSection('login-section');
     }
@@ -505,7 +505,7 @@
     }
 
     function backToMenu() {
-        showSection(currentUser === "admin" ? 'admin-view' : 'tech-view');
+        showSection(window.currentUser === "admin" ? 'admin-view' : 'tech-view');
     }
 
     // OPERACIONES DE DATOS
