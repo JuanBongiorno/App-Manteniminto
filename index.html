@@ -512,7 +512,7 @@
     async function cargarPedidos() {
         // Primero mostrar lo que tenemos localmente para fluidez instantánea
         const localData = await localforage.getItem('cache_pedidos');
-        if(localData) {
+        if (Array.isArray(localData)) {
             pedidos = localData;
             renderPedidos();
             renderPedidosTech();
@@ -525,8 +525,38 @@
                 .order('fecha', { ascending: false });
             
             if (!error && data) {
-                pedidos = data;
-                await localforage.setItem('cache_pedidos', data);
+                let serverPedidos = data.map(p => ({ ...p, estado: mapEstadoFromServer(p.estado) }));
+                const cola = await localforage.getItem('sync_queue') || [];
+                const nuevosLocales = cola
+                    .filter(item => item.tipo === 'NUEVO_PEDIDO')
+                    .map(item => item.data || item);
+
+                const cachedLocales = Array.isArray(localData)
+                    ? localData.filter(item => item.id && item.id.toString().startsWith('local_'))
+                    : [];
+
+                const existingIds = new Set(serverPedidos.map(p => p.id));
+                const existingLocalIds = new Set(serverPedidos.map(p => p.local_id).filter(Boolean));
+                const addedLocalIds = new Set();
+
+                const mergeLocal = (localItems) => {
+                    for (const nl of localItems) {
+                        const localId = nl.local_id || nl.id;
+                        if (!localId) continue;
+                        if (addedLocalIds.has(localId)) continue;
+                        if (existingIds.has(nl.id)) continue;
+                        if (existingLocalIds.has(localId)) continue;
+
+                        addedLocalIds.add(localId);
+                        serverPedidos.unshift(nl);
+                    }
+                };
+
+                mergeLocal(nuevosLocales);
+                mergeLocal(cachedLocales);
+
+                pedidos = serverPedidos;
+                await localforage.setItem('cache_pedidos', pedidos);
                 renderPedidos();
                 renderPedidosTech();
             }
@@ -566,14 +596,14 @@
     async function guardarPedido() {
         const btn = document.getElementById('btnGuardar');
         const nuevo = {
-            dispenser_id: document.getElementById('dispenser_id').value,
-            cliente_usuario: document.getElementById('cliente_usuario').value,
-            sector: document.getElementById('sector').value,
-            lugar: document.getElementById('lugar').value,
-            desperfecto: document.getElementById('desperfecto').value,
-            observaciones: document.getElementById('observaciones').value,
-            contacto: document.getElementById('contacto').value,
-            extra: document.getElementById('extra').value,
+            dispenser_id: document.getElementById('dispenser_id').value.trim(),
+            cliente_usuario: document.getElementById('cliente_usuario').value.trim(),
+            sector: document.getElementById('sector').value.trim(),
+            lugar: document.getElementById('lugar').value.trim(),
+            desperfecto: document.getElementById('desperfecto').value.trim(),
+            observaciones: document.getElementById('observaciones').value.trim(),
+            contacto: document.getElementById('contacto').value.trim(),
+            extra: document.getElementById('extra').value.trim(),
             estado: 'AMARILLO',
             fecha: new Date().toISOString().split('T')[0]
         };
@@ -583,21 +613,35 @@
         nuevo.local_id = localId;
         nuevo.id = localId; // usar id local para mostrar inmediatamente en la UI
 
-        if(!nuevo.dispenser_id || !nuevo.cliente_usuario) return alert("Faltan datos obligatorios");
-        
-        // --- LOGICA OFFLINE: GUARDAR EN COLA ---
-        await agregarAColaSync('NUEVO_PEDIDO', nuevo);
-        
-        // Actualizar vista local inmediatamente
-        pedidos.unshift(nuevo);
-        await localforage.setItem('cache_pedidos', pedidos);
-        // Refrescar vistas para que el técnico vea el pedido inmediatamente
-        try { renderPedidos(); renderPedidosTech(); } catch(e) { /* ignore */ }
+        if(!nuevo.dispenser_id || !nuevo.cliente_usuario || !nuevo.desperfecto) {
+            return alert("Faltan datos obligatorios");
+        }
 
-        alert("Pedido guardado localmente. Se subirá automáticamente al detectar internet.");
-        document.getElementById('form-pedido').reset();
-        backToMenu();
-        procesarColaSync();
+        btn.disabled = true;
+        btn.innerText = "GUARDANDO...";
+
+        try {
+            // --- LOGICA OFFLINE: GUARDAR EN COLA ---
+            await agregarAColaSync('NUEVO_PEDIDO', nuevo);
+            
+            // Actualizar vista local inmediatamente
+            pedidos.unshift(nuevo);
+            await localforage.setItem('cache_pedidos', pedidos);
+            renderPedidos();
+            renderPedidosTech();
+
+            alert("Pedido guardado localmente. Se subirá automáticamente al detectar internet.");
+            document.getElementById('form-pedido').reset();
+            document.getElementById('dispenser_id').focus();
+            backToMenu();
+            procesarColaSync();
+        } catch (err) {
+            console.error('Error guardando pedido offline:', err);
+            alert("No se pudo guardar el pedido. Intenta de nuevo.");
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "Guardar en Nube";
+        }
     }
 
     function renderPedidos() {
@@ -694,6 +738,7 @@
 
             const reporte = {
                 id: currentPedidoId,
+                local_id: currentPedidoData?.local_id || currentPedidoId,
                 tech_obs: obs,
                 tech_acciones: acciones,
                 tech_responsable: `${nombre} ${apellido}`,
@@ -789,8 +834,27 @@
 
             try {
                 if(item.tipo === 'NUEVO_PEDIDO') {
-                    const { error } = await _supabase.from('pedidos').insert([item.data]);
+                    const nuevoPedido = { ...item.data };
+                    const localId = nuevoPedido.local_id;
+                    delete nuevoPedido.id; // evitar enviar el id local si la tabla usa serial
+                    delete nuevoPedido.local_id; // no guardar campo local en servidor
+                    nuevoPedido.estado = mapEstadoToServer(nuevoPedido.estado);
+
+                    const { data: inserted, error } = await _supabase.from('pedidos')
+                        .insert([nuevoPedido])
+                        .select();
                     if(error) throw error;
+
+                    if (inserted && inserted.length > 0) {
+                        const servidor = { ...inserted[0], estado: mapEstadoFromServer(inserted[0].estado) };
+                        const localIndex = pedidos.findIndex(p => p.local_id === localId || p.id === localId);
+                        if (localIndex !== -1) {
+                            pedidos.splice(localIndex, 1, servidor);
+                        } else {
+                            pedidos.unshift(servidor);
+                        }
+                        await localforage.setItem('cache_pedidos', pedidos);
+                    }
                 } 
                 else if(item.tipo === 'CIERRE_TECNICO') {
                     const d = item.data;
