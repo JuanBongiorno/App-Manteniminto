@@ -526,7 +526,23 @@
             
             if (!error && data) {
                 // Normalizar estados que pueda devolver el servidor
-                pedidos = data.map(p => ({ ...p, estado: mapEstadoFromServer(p.estado) }));
+                let serverPedidos = data.map(p => ({ ...p, estado: mapEstadoFromServer(p.estado) }));
+
+                // Fusionar con pedidos locales que pueden estar en la cola (NUEVO_PEDIDO)
+                try {
+                    const cola = await localforage.getItem('sync_queue') || [];
+                    const nuevosLocales = cola.filter(i => i.tipo === 'NUEVO_PEDIDO').map(i => i.data || i);
+                    // Añadir los locales al inicio si no están ya en serverPedidos (comparar por local_id o id)
+                    for (const nl of nuevosLocales) {
+                        const exists = serverPedidos.some(sp => (sp.id && nl.id && sp.id === nl.id) || (nl.local_id && (sp.local_id === nl.local_id || sp.id === nl.local_id)) );
+                        if (!exists) {
+                            // mantener estado y local_id para que se muestre como pendiente
+                            serverPedidos.unshift(nl);
+                        }
+                    }
+                } catch(e) { console.warn('No se pudo obtener cola para fusionar:', e); }
+
+                pedidos = serverPedidos;
                 await localforage.setItem('cache_pedidos', pedidos);
                 renderPedidos();
                 renderPedidosTech();
@@ -592,6 +608,8 @@
         // Actualizar vista local inmediatamente
         pedidos.unshift(nuevo);
         await localforage.setItem('cache_pedidos', pedidos);
+        // Refrescar vistas para que el técnico vea el pedido inmediatamente
+        try { renderPedidos(); renderPedidosTech(); } catch(e) { /* ignore */ }
 
         alert("Pedido guardado localmente. Se subirá automáticamente al detectar internet.");
         document.getElementById('form-pedido').reset();
